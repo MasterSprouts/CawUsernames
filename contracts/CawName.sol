@@ -14,14 +14,26 @@ contract CawName is
   Ownable
 {
 
-  IERC20 public immutable CAW = IERC20(0xf3b9569F82B18aEf890De263B84189bd33EBe452);
+  // TODO:
+  // Not using immutable for Rinkeby,
+  // remove this line when deploying to mainnet:
+  IERC20 public CAW = IERC20(0xf3b9569F82B18aEf890De263B84189bd33EBe452);
+  // IERC20 public immutable CAW = IERC20(0xf3b9569F82B18aEf890De263B84189bd33EBe452);
+
+
+
   CawNameURI public uriGenerator;
 
   string[] public usernames;
   mapping(string => uint256) idsByUsername;
 
-  constructor(address _gui) ERC721("CAW NAME", "cawNAME") {
+  constructor(address _gui, address _cawAddress) ERC721("CAW NAME", "cawNAME") {
     uriGenerator = CawNameURI(_gui);
+
+    // TODO: 
+    // Using MintableCaw for rinkeby:
+    // Remove this line when deploying to the mainnet
+    CAW = IERC20(_cawAddress);
   }
 
   function tokenURI(uint256 tokenId) override public view returns (string memory) {
