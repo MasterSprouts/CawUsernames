@@ -152,10 +152,14 @@ contract('CawNames', function(accounts) {
     }
     expect(error).to.include('must only consist of 1-255 lowercase letters');
     error = null;
+      tx = await buyUsername(accounts[2], 'vitalikbuterin');
 
     console.log("generator addr", await usernames.uriGenerator());
     console.log("URI", await usernames.usernames(0));
+
     console.log("URI", await usernames.tokenURI(1));
+
+    console.log("URI", await usernames.tokenURI(2));
 
 
 
