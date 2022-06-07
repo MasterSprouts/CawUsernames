@@ -35,6 +35,22 @@ contract CawName is
   function mint(string memory username) public {
     require(idsByUsername[username] == 0, "Username has already been taken");
     require(isValidUsername(username), "Username must only consist of 1-255 lowercase letters and numbers");
+    uint256 amount = costOfName(username);
+
+    require(CAW.balanceOf(_msgSender()) >= amount, "You do not have enough CAW to make this purchase");
+    require(CAW.allowance(_msgSender(), address(this)) >= amount, "You must approve CAW NAMES to spend your CAW");
+    CAW.transferFrom(_msgSender(), address(0xdEAD000000000000000042069420694206942069), amount);
+
+    usernames.push(username);
+    uint256 newId = usernames.length;
+    idsByUsername[username] = newId;
+
+    _safeMint(_msgSender(), newId);
+  }
+
+  function costOfName(string memory username) public pure returns (uint256) {
+    uint8 usernameLength = uint8(bytes(username).length);
+    uint256 amount;
 
     // FROM THE SPEC:
     //
@@ -50,8 +66,7 @@ contract CawName is
     // - 7 Character username -BURN 10,000,000 CAW (90c, $18, $180) 
     // - 8 Character and up username - BURN 1,000,000 CAW (9c, $1.80, $18) 
 
-    uint256 amount;
-    uint8 usernameLength = uint8(bytes(username).length);
+
     if (usernameLength == 1)
       amount = 10 ** 12; // 1,000,000,000,000
     else if (usernameLength == 2)
@@ -68,15 +83,7 @@ contract CawName is
       amount = 10 ** 7; // 10,000,000
     else amount = 10 ** 6; // 1,000,000
 
-    require(CAW.balanceOf(_msgSender()) >= amount, "You do not have enough CAW to make this purchase");
-    require(CAW.allowance(_msgSender(), address(this)) >= amount, "You must approve CAW NAMES to spend your CAW");
-    CAW.transferFrom(_msgSender(), address(0xdEAD000000000000000042069420694206942069), amount * 10**18);
-
-    usernames.push(username);
-    uint256 newId = usernames.length;
-    idsByUsername[username] = newId;
-
-    _safeMint(_msgSender(), newId);
+    return amount * 10**18;
   }
 
   /**

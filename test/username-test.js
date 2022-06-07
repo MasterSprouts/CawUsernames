@@ -109,22 +109,28 @@ contract('CawNames', function(accounts) {
     error = null;
     console.log("SUCCESS 1")
 
-    tx = await buyUsername(accounts[2], 'user');
+    var name = 'userrrr';
+    var cost = await usernames.costOfName(name);
+    balance = await token.balanceOf(accounts[2]);
+    console.log("BALANCE:", balance.toString(), "COST:", cost.toString());
+
+    tx = await buyUsername(accounts[2], name);
     console.log("SUCCESS 2")
     var balanceWas = balance;
     balance = await token.balanceOf(accounts[2])
 
     console.log("BALANCES:", BigInt(balanceWas) - BigInt(balance) );
-    expect(BigInt(balanceWas) - BigInt(balance) == 6000000000n * 10n**18n).to.equal(true);
+    expect(BigInt(balanceWas) - BigInt(balance) == BigInt(cost)).to.equal(true);
 
 
     try {
-      tx = await buyUsername(accounts[2], 'user');
+      tx = await buyUsername(accounts[2], name);
     } catch(err) {
       error = err.message;
     }
     expect(error).to.include('has already been taken');
     error = null;
+    console.log("SUCCESS 3")
 
 
     try {
@@ -134,6 +140,7 @@ contract('CawNames', function(accounts) {
     }
     expect(error).to.include('do not have enough CAW');
     error = null;
+    console.log("SUCCESS 4")
 
 
     try {
