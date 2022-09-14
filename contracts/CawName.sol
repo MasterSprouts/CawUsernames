@@ -225,7 +225,7 @@ contract CawName is
     require(cawBalanceOf[followerTokenId] >= 30000, 'you need at least 30000 CAW to follow a user');
 
     cawBalanceOf[followerTokenId] -= 30000;
-    cawBalanceOf[followerTokenId] += 24000;
+    cawBalanceOf[followeeTokenId] += 24000;
     actions[followerTokenId] += 1;
     stakePool += 6000;
   }
