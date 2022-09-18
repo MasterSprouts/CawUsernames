@@ -160,7 +160,7 @@ contract CawName is
     totalCaw -= amount;
   }
 
-  function cawBalanceOf(uint256 tokenId) public returns (uint256){
+  function cawBalanceOf(uint256 tokenId) public view returns (uint256){
     return cawOwnership[tokenId] * rewardMultiplier / percision;
   }
 

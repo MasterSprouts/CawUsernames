@@ -25,6 +25,17 @@ function timeout(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+async function deposit(user, tokenId, amount) {
+
+  console.log("DEPOSIT", tokenId, (BigInt(amount) * 10n**18n).toString());
+  t = await usernames.deposit(tokenId, (BigInt(amount) * 10n**18n).toString(), {
+    nonce: await web3.eth.getTransactionCount(user),
+    from: user,
+  });
+
+  return t;
+}
+
 async function buyUsername(user, name) {
 
   var balance = await token.balanceOf(user)
@@ -161,14 +172,20 @@ contract('CawNames', function(accounts) {
     error = null;
       tx = await buyUsername(accounts[2], 'vitalikbuterin');
 
-    console.log("generator addr", await usernames.uriGenerator());
+    // console.log("generator addr", await usernames.uriGenerator());
     console.log("URI", await usernames.usernames(0));
 
-    console.log("URI", await usernames.tokenURI(1));
+    // console.log("URI", await usernames.tokenURI(1));
 
-    console.log("URI", await usernames.tokenURI(2));
+    // console.log("URI", await usernames.tokenURI(2));
 
 
+    tx = await deposit(accounts[2], 1, 1000);
+    console.log("Done deposit");
+
+    balance = await usernames.cawBalanceOf(1);
+    console.log("BALNCE", BigInt(balance.toString()));
+    expect(BigInt(balance.toString()) == 1000n * 10n**18n).to.equal(true);
 
   });
 
