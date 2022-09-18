@@ -18,16 +18,20 @@ contract CawName is
   IERC20 public immutable CAW = IERC20(0xf3b9569F82B18aEf890De263B84189bd33EBe452);
   CawNameURI public uriGenerator;
 
+  uint256 public totalCaw;
+
+
   string[] public usernames;
   mapping(uint256 => uint256) public actions;
   mapping(string => uint256) public idByUsername;
-  mapping(uint256 => uint256) public cawBalanceOf;
+  mapping(uint256 => uint256) public cawOwnership;
   mapping(uint256 => uint256) public previousOwners;
 
   // tokenId => actionNumber => timestamp ?????????????
   mapping(uint256 => mapping(uint256 => uint256)) public actionTimestamps;
 
-  uint256 public stakePool;
+  uint256 public rewardMultiplier = 10**18;
+  uint256 public percision = 10**18;
   bytes32 public eip712DomainHash;
 
   constructor(address _gui) ERC721("CAW NAME", "cawNAME") {
@@ -143,15 +147,41 @@ contract CawName is
     require(ownerOf(tokenId) == msg.sender, "can not deposit into a CawName that you do not own");
 
     CAW.transferFrom(msg.sender, address(this), amount);
-    cawBalanceOf[tokenId] += amount;
+    setCawBalance(tokenId, cawBalanceOf(tokenId) + amount);
+    totalCaw += amount;
   }
 
   function withdraw(uint256 tokenId, uint256 amount) public {
     require(ownerOf(tokenId) == msg.sender, "can not withdraw from a CawName that you do not own");
-    require(cawBalanceOf[tokenId] >= amount, "withdraw amount is greater than this CAW balance");
+    require(cawBalanceOf(tokenId) >= amount, "insufficent CAW balance");
 
+    setCawBalance(tokenId, cawBalanceOf(tokenId) - amount);
     CAW.transfer(msg.sender, amount);
-    cawBalanceOf[tokenId] -= amount;
+    totalCaw -= amount;
+  }
+
+  function cawBalanceOf(uint256 tokenId) public returns (uint256){
+    return cawOwnership[tokenId] * rewardMultiplier / percision;
+  }
+
+  function spendAndDistribute(uint256 tokenId, uint256 amountToSpend, uint256 amountToDistribute) private {
+    uint256 balance = cawBalanceOf(tokenId);
+    amountToDistribute *= percision;
+    amountToSpend *= percision;
+
+    require(balance >= amountToSpend, 'insufficent CAW balance');
+    uint256 newCawBalance = balance - amountToSpend;
+
+    rewardMultiplier += rewardMultiplier * amountToDistribute / (totalCaw - balance);
+    setCawBalance(tokenId, newCawBalance);
+  }
+
+  function addToBalance(uint256 tokenId, uint256 amount) internal {
+    setCawBalance(tokenId, cawBalanceOf(tokenId) + (amount * percision));
+  }
+
+  function setCawBalance(uint256 tokenId, uint256 newCawBalance) internal {
+    cawOwnership[tokenId] = percision * newCawBalance / rewardMultiplier;
   }
 
   function caw(
@@ -166,50 +196,47 @@ contract CawName is
     );
     address signer = getSigner(functionCall, v, r, s);
     require(signer == ownerOf(tokenId), "signer is not owner of this CawName");
-    require(cawBalanceOf[tokenId] >= 5000, 'you need at least 5000 CAW to post a caw');
 
-    actionTimestamps[tokenId][action] = timestamp;
-    cawBalanceOf[tokenId] -= 5000;
+    spendAndDistribute(tokenId, 5000, 5000);
+
     actions[tokenId] += 1;
-    stakePool += 5000;
+    actionTimestamps[tokenId][action] = timestamp;
   }
 
   function likeCaw(
     uint8 v, bytes32 r, bytes32 s,
     uint256 senderTokenId,
-    uint256 posterTokenId,
+    uint256 postTokenId,
     uint256 cawId
   ) external {
     bytes memory functionCall = abi.encode(
-      keccak256("Caw(uint256 cawId,uint256 senderTrokenId)"), posterTokenId, senderTokenId, cawId
+      keccak256("Caw(uint256 cawId,uint256 senderTrokenId)"), postTokenId, senderTokenId, cawId
     );
     address signer = getSigner(functionCall, v, r, s);
     require(signer == ownerOf(senderTokenId), "signer is not owner of this CawName");
-    require(cawBalanceOf[senderTokenId] >= 2000, 'you need at least 2000 CAW to like a caw');
 
-    cawBalanceOf[senderTokenId] -= 2000;
-    cawBalanceOf[posterTokenId] += 1600;
+    spendAndDistribute(senderTokenId, 2000, 400);
+    addToBalance(postTokenId, 1600);
+
     actions[senderTokenId] += 1;
-    stakePool += 400;
   }
 
   function reCaw(
     uint8 v, bytes32 r, bytes32 s,
+    uint256 postTokenId,
     uint256 posterTokenId,
-    uint256 senderTokenId,
     uint256 cawId
   ) external {
     bytes memory functionCall = abi.encode(
-      keccak256("Caw(uint256 posterTokenId,uint256 senderTokenId)"), posterTokenId, senderTokenId, cawId
+      keccak256("Caw(uint256 postTokenId,uint256 posterTokenId)"), postTokenId, posterTokenId, cawId
     );
     address signer = getSigner(functionCall, v, r, s);
-    require(signer == ownerOf(senderTokenId), "signer is not owner of this CawName");
-    require(cawBalanceOf[senderTokenId] >= 4000, 'you need at least 4000 CAW to re-caw');
+    require(signer == ownerOf(posterTokenId), "signer is not owner of this CawName");
 
-    cawBalanceOf[senderTokenId] -= 4000;
-    cawBalanceOf[posterTokenId] += 2000;
-    actions[senderTokenId] += 1;
-    stakePool += 2000;
+    spendAndDistribute(posterTokenId, 4000, 2000);
+    addToBalance(postTokenId, 2000);
+
+    actions[posterTokenId] += 1;
   }
 
   function follow(
@@ -222,12 +249,12 @@ contract CawName is
     );
     address signer = getSigner(functionCall, v, r, s);
     require(signer == ownerOf(followerTokenId), "signer is not owner of this CawName");
-    require(cawBalanceOf[followerTokenId] >= 30000, 'you need at least 30000 CAW to follow a user');
 
-    cawBalanceOf[followerTokenId] -= 30000;
-    cawBalanceOf[followeeTokenId] += 24000;
+    spendAndDistribute(followerTokenId, 30000, 6000);
+    addToBalance(followeeTokenId, 24000);
+
+    followers[followeeTokenId] += 1;
     actions[followerTokenId] += 1;
-    stakePool += 6000;
   }
 
   function getSigner(
