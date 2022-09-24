@@ -3,8 +3,8 @@
 pragma solidity ^0.8.0;
 
 import "../node_modules/@openzeppelin/contracts/token/ERC721/extensions/ERC721Enumerable.sol";
-import "../node_modules/@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "../node_modules/@openzeppelin/contracts/utils/cryptography/draft-EIP712.sol";
+import "../node_modules/@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "../node_modules/@openzeppelin/contracts/access/Ownable.sol";
 import "./CawNameURI.sol";
 
@@ -15,105 +15,94 @@ contract CawName is
   Ownable
 {
 
-  IERC20 public immutable CAW = IERC20(0xf3b9569F82B18aEf890De263B84189bd33EBe452);
+  IERC20 public immutable CAW;
   CawNameURI public uriGenerator;
 
   uint256 public totalCaw;
 
+  address public minter;
+
+  struct CawLike {
+    uint64 senderTokenId;
+    uint64 ownerTokenId;
+    address sender;
+    uint32 action;
+    bytes8 cawId;
+  }
+
+  struct FollowData {
+    address sender;
+    uint64 senderTokenId;
+    uint64 followeeTokenId;
+    uint32 action;
+  }
+
+  struct CawData {
+    string text;
+    address sender;
+    uint64 tokenId;
+    uint32 action;
+  }
+
+  struct ReCawData {
+    uint64 senderTokenId;
+    uint64 ownerTokenId;
+    address sender;
+    uint32 action;
+    bytes8 cawId;
+  }
 
   string[] public usernames;
-  mapping(uint256 => uint256) public actions;
-  mapping(string => uint256) public idByUsername;
-  mapping(uint256 => uint256) public cawOwnership;
-  mapping(uint256 => uint256) public previousOwners;
 
-  // tokenId => actionNumber => timestamp ?????????????
-  mapping(uint256 => mapping(uint256 => uint256)) public actionTimestamps;
+  // 4,294,967,296 should be enough actions for each user
+  mapping(uint64 => uint32) public takenActionCount;
+
+  mapping(uint64 => uint64) public followerCounts;
+
+  // mapping(uint256 => uint256) public previousOwners;
+  mapping(uint64 => uint256) public cawOwnership;
+
+
+  // tokenID => reducedSig => action
+  mapping(uint64 => mapping(bytes8 => uint32)) public likes;
+
+  // tokenID => reducedSig => action
+  mapping(uint64 => mapping(bytes8 => bool)) public isVerified;
 
   uint256 public rewardMultiplier = 10**18;
-  uint256 public percision = 10**18;
+  uint256 public precision = 30425026352721 ** 2;// ** 3;
   bytes32 public eip712DomainHash;
 
-  constructor(address _gui) ERC721("CAW NAME", "cawNAME") {
+  constructor(address _caw, address _gui) ERC721("CAW NAME", "cawNAME") {
     eip712DomainHash = generateDomainHash();
     uriGenerator = CawNameURI(_gui);
+    CAW = IERC20(_caw);
+    // CAW = IERC20(0xf3b9569F82B18aEf890De263B84189bd33EBe452);
   }
 
-  function tokenURI(uint256 tokenId) override public view returns (string memory) {
-    return uriGenerator.generate(usernames[tokenId - 1]);
+  function setMinter(address _minter) public onlyOwner {
+    minter = _minter;
   }
 
+  // create an ARTIST_ROLE
   function setUriGenerator(address _gui) public onlyOwner {
     uriGenerator = CawNameURI(_gui);
   }
 
-  // This might be needed to validate CAWs on the
-  // front end after a token has been transfered
-  //
-  // function _afterTokenTransfer(
-  //   address from,
-  //   address to,
-  //   uint256 tokenId
-  // ) internal virtual override {
-  //   super._afterTokenTransfer(from, to, tokenId);
-  //
-  //   if (from != address(0))
-  //     previousOwners[tokenId].add(from);
-  // }
+  function tokenURI(uint256 tokenId) override public view returns (string memory) {
+    return uriGenerator.generate(usernames[uint64(tokenId) - 1]);
+  }
 
-  function mint(string memory username) public {
-    require(idByUsername[username] == 0, "Username has already been taken");
-    require(isValidUsername(username), "Username must only consist of 1-255 lowercase letters and numbers");
-    uint256 amount = costOfName(username);
-
-    require(CAW.balanceOf(_msgSender()) >= amount, "You do not have enough CAW to make this purchase");
-    require(CAW.allowance(_msgSender(), address(this)) >= amount, "You must approve CAW NAMES to spend your CAW");
-    CAW.transferFrom(_msgSender(), address(0xdEAD000000000000000042069420694206942069), amount);
-
+  function mint(address sender, string memory username, uint64 newId) public {
+    require(minter == _msgSender(), "caller is not the minter");
     usernames.push(username);
-    uint256 newId = usernames.length;
-    idByUsername[username] = newId;
-
-    _safeMint(_msgSender(), newId);
+    _safeMint(sender, newId);
   }
 
-  function costOfName(string memory username) public pure returns (uint256) {
-    uint8 usernameLength = uint8(bytes(username).length);
-    uint256 amount;
-
-    // FROM THE SPEC:
-    //
-    // Every username is unique, and may use a-z and 0-9,
-    //   without the use of special characters (emojis, etc..,) or capital letters. 
-    //
-    // - Single Character username (rare!) BURN 1,000,000,000,000 ($89,985, $1,799,712, $17,997,120) 
-    // - 2 Character username - BURN 240,000,000,000 CAW ($21,600, $432,000, $4,320,000) 
-    // - 3 Character Username - BURN 60,000,000,000 CAW ($5400, $108,000, $1,080,000) 
-    // - 4 Character Username - BURN 6,000,000,000 CAW ($540, $10,800 $108,000) 
-    // - 5 Character username - BURN 200,000,000 CAW ($18, $360, $3600) 
-    // - 6 Character username - BURN 20,000,000 CAW ($1.80, $36, $360) 
-    // - 7 Character username -BURN 10,000,000 CAW (90c, $18, $180) 
-    // - 8 Character and up username - BURN 1,000,000 CAW (9c, $1.80, $18) 
-
-
-    if (usernameLength == 1)
-      amount = 10 ** 12; // 1,000,000,000,000
-    else if (usernameLength == 2)
-      amount = 24 * 10 ** 10; // 240,000,000,000
-    else if (usernameLength == 3)
-      amount = 6 * 10 ** 10;  // 60,000,000,000
-    else if (usernameLength == 4)
-      amount = 6 * 10 ** 9;  // 6,000,000,000
-    else if (usernameLength == 5)
-      amount = 2 * 10 ** 8; // 200,000,000
-    else if (usernameLength == 6)
-      amount = 2 * 10 ** 7; // 20,000,000
-    else if (usernameLength == 7)
-      amount = 10 ** 7; // 10,000,000
-    else amount = 10 ** 6; // 1,000,000
-
-    return amount * 10**18;
+  function nextId() public view returns (uint64) {
+    return uint64(usernames.length) + 1;
   }
+
 
   /**
    * @dev See {IERC165-supportsInterface}.
@@ -128,22 +117,7 @@ contract CawName is
     return super.supportsInterface(interfaceId);
   }
 
-  function isValidUsername(string memory _input) public pure returns (bool) {
-    bytes memory input = bytes(_input);
-    if (input.length == 0 || input.length > 255) return false;
-
-    for (uint8 i = 0; i < input.length; i++) {
-      uint8 char = uint8(input[i]);
-      if (
-        (char < 48 || char > 57) && // not a number
-          (char < 97 || char > 122) // not a lowercase character
-      ) return false;
-    }
-
-    return true;
-  }
-
-  function deposit(uint256 tokenId, uint256 amount) public {
+  function deposit(uint64 tokenId, uint256 amount) public {
     require(ownerOf(tokenId) == msg.sender, "can not deposit into a CawName that you do not own");
 
     CAW.transferFrom(msg.sender, address(this), amount);
@@ -151,7 +125,7 @@ contract CawName is
     totalCaw += amount;
   }
 
-  function withdraw(uint256 tokenId, uint256 amount) public {
+  function withdraw(uint64 tokenId, uint256 amount) public {
     require(ownerOf(tokenId) == msg.sender, "can not withdraw from a CawName that you do not own");
     require(cawBalanceOf(tokenId) >= amount, "insufficent CAW balance");
 
@@ -160,14 +134,14 @@ contract CawName is
     totalCaw -= amount;
   }
 
-  function cawBalanceOf(uint256 tokenId) public view returns (uint256){
-    return cawOwnership[tokenId] * rewardMultiplier / percision;
+  function cawBalanceOf(uint64 tokenId) public view returns (uint256){
+    return cawOwnership[tokenId] * rewardMultiplier / (precision);
   }
 
-  function spendAndDistribute(uint256 tokenId, uint256 amountToSpend, uint256 amountToDistribute) private {
+  function spendAndDistribute(uint64 tokenId, uint256 amountToSpend, uint256 amountToDistribute) private {
     uint256 balance = cawBalanceOf(tokenId);
-    amountToDistribute *= percision;
-    amountToSpend *= percision;
+    amountToDistribute *= 10**18;
+    amountToSpend *= 10**18;
 
     require(balance >= amountToSpend, 'insufficent CAW balance');
     uint256 newCawBalance = balance - amountToSpend;
@@ -176,89 +150,131 @@ contract CawName is
     setCawBalance(tokenId, newCawBalance);
   }
 
-  function addToBalance(uint256 tokenId, uint256 amount) internal {
-    setCawBalance(tokenId, cawBalanceOf(tokenId) + (amount * percision));
+  function addToBalance(uint64 tokenId, uint256 amount) internal {
+    setCawBalance(tokenId, cawBalanceOf(tokenId) + (amount * 10**18));
   }
 
-  function setCawBalance(uint256 tokenId, uint256 newCawBalance) internal {
-    cawOwnership[tokenId] = percision * newCawBalance / rewardMultiplier;
+  function setCawBalance(uint64 tokenId, uint256 newCawBalance) internal {
+    cawOwnership[tokenId] = precision * newCawBalance / rewardMultiplier;
   }
 
   function caw(
     uint8 v, bytes32 r, bytes32 s,
-    uint256 action,
-    uint256 tokenId,
-    uint256 timestamp,
-    string memory text
+    CawData calldata cawData
   ) external {
-    bytes memory functionCall = abi.encode(
-      keccak256("Caw(uint256 action,uint256 tokenId,uint256 timestamp,string text)"), action, tokenId, timestamp, text
+
+    bytes memory hash = abi.encode(
+      keccak256("CawData(string text,address sender,uint64 tokenId,uint32 action)"),
+      keccak256(bytes(cawData.text)),
+      cawData.sender,
+      cawData.tokenId,
+      cawData.action
     );
-    address signer = getSigner(functionCall, v, r, s);
-    require(signer == ownerOf(tokenId), "signer is not owner of this CawName");
 
-    spendAndDistribute(tokenId, 5000, 5000);
+    // address signer = getSigner(hash, v, r, s);
+    // require(signer == ownerOf(cawData.tokenId), "signer is not owner of this CawName");
+    // require(takenActionCount[cawData.tokenId] == cawData.action - 1, "invalid action number");
+    // require(cawData.sender == ownerOf(cawData.tokenId), "the correct token owner must be submitted");
 
-    actions[tokenId] += 1;
-    actionTimestamps[tokenId][action] = timestamp;
+    verifySignerAndActionId(
+      v, r, s, hash, cawData.tokenId,
+      cawData.sender, cawData.action
+    );
+
+    spendAndDistribute(cawData.tokenId, 5000, 5000);
+
+    takenActionCount[cawData.tokenId] += 1;
+    isVerified[cawData.tokenId][bytes8(r)] = true;
   }
 
   function likeCaw(
     uint8 v, bytes32 r, bytes32 s,
-    uint256 senderTokenId,
-    uint256 postTokenId,
-    uint256 cawId
+    CawLike calldata likeData
   ) external {
-    bytes memory functionCall = abi.encode(
-      keccak256("Caw(uint256 cawId,uint256 senderTrokenId)"), postTokenId, senderTokenId, cawId
+    // Do we need this? it adds more gas to keep track. Should we allow users to 'unlike' as well?
+    // require(likedBy[likeData.tokenId][likeData.cawId][likeData.senderTokenId] == false, 'Caw has already been liked');
+    bytes memory hash = abi.encode(
+      keccak256("CawLike(uint64 senderTokenId,address sender,uint64 ownerTokenId,bytes8 cawId,uint32 action)"),
+      likeData.senderTokenId, likeData.sender, likeData.ownerTokenId,
+      likeData.cawId, likeData.action
     );
-    address signer = getSigner(functionCall, v, r, s);
-    require(signer == ownerOf(senderTokenId), "signer is not owner of this CawName");
 
-    spendAndDistribute(senderTokenId, 2000, 400);
-    addToBalance(postTokenId, 1600);
+    verifySignerAndActionId(
+      v, r, s, hash,
+      likeData.senderTokenId,
+      likeData.sender, likeData.action
+    );
 
-    actions[senderTokenId] += 1;
+    spendAndDistribute(likeData.senderTokenId, 2000, 400);
+    addToBalance(likeData.ownerTokenId, 1600);
+
+    isVerified[likeData.senderTokenId][bytes8(r)] = true;
+    takenActionCount[likeData.senderTokenId] += 1;
+    likes[likeData.ownerTokenId][likeData.cawId] += 1;
   }
 
   function reCaw(
     uint8 v, bytes32 r, bytes32 s,
-    uint256 postTokenId,
-    uint256 posterTokenId,
-    uint256 cawId
+    ReCawData calldata reCawData
   ) external {
-    bytes memory functionCall = abi.encode(
-      keccak256("Caw(uint256 postTokenId,uint256 posterTokenId)"), postTokenId, posterTokenId, cawId
+    bytes memory hash = abi.encode(
+      keccak256("ReCawData(uint64 senderTokenId,uint64 ownerTokenId,address sender,uint32 action,bytes8 cawId)"),
+      reCawData.senderTokenId, reCawData.ownerTokenId,
+      reCawData.sender, reCawData.action,
+      reCawData.cawId
     );
-    address signer = getSigner(functionCall, v, r, s);
-    require(signer == ownerOf(posterTokenId), "signer is not owner of this CawName");
 
-    spendAndDistribute(posterTokenId, 4000, 2000);
-    addToBalance(postTokenId, 2000);
+    verifySignerAndActionId(
+      v, r, s, hash,
+      reCawData.senderTokenId,
+      reCawData.sender, reCawData.action
+    );
 
-    actions[posterTokenId] += 1;
+    spendAndDistribute(reCawData.senderTokenId, 4000, 2000);
+    addToBalance(reCawData.ownerTokenId, 2000);
+
+    takenActionCount[reCawData.senderTokenId] += 1;
+    isVerified[reCawData.senderTokenId][bytes8(r)] = true;
   }
 
-  function follow(
+  function followUser(
     uint8 v, bytes32 r, bytes32 s,
-    uint256 followerTokenId,
-    uint256 followeeTokenId
+    FollowData calldata followData
   ) external {
-    bytes memory functionCall = abi.encode(
-      keccak256("Caw(uint256 followerTokenId,uint256 followeeTokenId)"), followeeTokenId, followerTokenId
+    bytes memory hash = abi.encode(
+      keccak256("FollowData(address sender,uint64 senderTokenId,uint64 followeeTokenId,uint32 action)"),
+      followData.sender, followData.senderTokenId,
+      followData.followeeTokenId, followData.action
     );
-    address signer = getSigner(functionCall, v, r, s);
-    require(signer == ownerOf(followerTokenId), "signer is not owner of this CawName");
 
-    spendAndDistribute(followerTokenId, 30000, 6000);
-    addToBalance(followeeTokenId, 24000);
+    verifySignerAndActionId(
+      v, r, s, hash,
+      followData.senderTokenId,
+      followData.sender, followData.action
+    );
 
-    followers[followeeTokenId] += 1;
-    actions[followerTokenId] += 1;
+    spendAndDistribute(followData.senderTokenId, 30000, 6000);
+    addToBalance(followData.followeeTokenId, 24000);
+
+    followerCounts[followData.followeeTokenId] += 1;
+    takenActionCount[followData.senderTokenId] += 1;
+    isVerified[followData.senderTokenId][bytes8(r)] = true;
+  }
+
+  function verifySignerAndActionId(
+    uint8 v, bytes32 r, bytes32 s,
+    bytes memory hash, uint64 senderTokenId,
+    address sender, uint32 action
+  ) internal view {
+
+    address signer = getSigner(hash, v, r, s);
+    require(signer == ownerOf(senderTokenId), "signer is not owner of this CawName");
+    require(takenActionCount[senderTokenId] == action - 1, "invalid action number");
+    require(sender == ownerOf(senderTokenId), "the correct token owner must be submitted");
   }
 
   function getSigner(
-    bytes memory functionCall,
+    bytes memory hashedObject,
     uint8 v, bytes32 r, bytes32 s
   ) public view returns (address) {
     uint256 chainId;
@@ -266,7 +282,7 @@ contract CawName is
       chainId := chainid()
     }
 
-    bytes32 hash = keccak256(abi.encodePacked("\x19\x01", eip712DomainHash, keccak256(functionCall)));
+    bytes32 hash = keccak256(abi.encodePacked("\x19\x01", eip712DomainHash, keccak256(hashedObject)));
     return ecrecover(hash, v,r,s);
   }
 
