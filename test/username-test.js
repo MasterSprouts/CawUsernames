@@ -226,7 +226,50 @@ async function followUser(params) {
   });
 
   var fullTx = await web3.eth.getTransaction(t.tx);
-  console.log("like caw GAS", BigInt(t.receipt.gasUsed));
+  console.log("follow GAS", BigInt(t.receipt.gasUsed));
+
+  return {
+    tx: t,
+    sig: sig
+  };
+}
+
+async function reCaw(params) {
+  action = params.action;
+  if (action == null) action = Number(await usernames.takenActionCount(params.senderTokenId));
+
+  console.log("---");
+  console.log("RECAW with action ", action);
+
+  const reCawData = {
+    action: action + 1,
+    senderTokenId: params.senderTokenId,
+    sender: params.sender,
+    ownerTokenId: params.ownerTokenId,
+    cawId: params.cawSig.substring(0,18),
+  };
+
+
+  var data = {
+    primaryType: 'ReCawData',
+    message: reCawData,
+    domain, 
+    types: {
+      EIP712Domain: dataTypes.EIP712Domain,
+      ReCawData: dataTypes.ReCawData,
+    },
+  };
+  // console.log('DATA', data)
+  var sig = await signData(params.sender, data);
+  var sigData = verifyAndSplitSig(sig, params.sender, data);
+
+  t = await usernames.reCaw(sigData.v, sigData.r, sigData.s, reCawData, {
+    nonce: await web3.eth.getTransactionCount(params.sender),
+    from: params.sender,
+  });
+
+  var fullTx = await web3.eth.getTransaction(t.tx);
+  console.log("ReCaw caw GAS", BigInt(t.receipt.gasUsed));
 
   return {
     tx: t,
@@ -518,6 +561,75 @@ contract('CawNames', function(accounts, x) {
     error = null;
 
 
+    await followUser({
+      sender: accounts[2],
+      followeeTokenId: 1,
+      senderTokenId: 2,
+    });
+
+    var followCount = await usernames.followerCount(1);
+    await expect(followCount.toString()).to.equal('1');
+
+    // 30k caw gets spent from the sender, 6000 distributed
+    // among other caw stakers proportional to their ownership
+    // 24000 added to the token that owns the liked caw
+
+    // balance(1) => 6620.1132 + 6000*6620.1132/(12437.5 + 6620.1132) + 24000
+    // balance(2) => 40942.3868 - 30000
+    // balance(3) => 12437.5 + 6000*12437.5/(12437.5 + 6620.1132)
+
+    await expectBalanceOf(1, {toEqual: 32704.3552});
+    await expectBalanceOf(2, {toEqual: 10942.3868});
+    await expectBalanceOf(3, {toEqual: 16353.2579});
+
+    try {
+      // It will fail if you try to replay the same call
+      await followUser({
+        sender: accounts[2],
+        followeeTokenId: 1,
+        senderTokenId: 2,
+        action: 1
+      });
+    } catch(err) { error = err.message; }
+    expect(error).to.include('invalid action number');
+    error = null;
+
+
+
+    await reCaw({
+      cawSig: secondCawSig,
+      sender: accounts[2],
+      ownerTokenId: 2,
+      senderTokenId: 1,
+    });
+
+    // var reCawCount = await usernames.reCawCount(1);
+    // await expect(reCawCount.toString()).to.equal('1');
+
+    // 4k caw gets spent from the sender, 2k distributed
+    // among other caw stakers proportional to their ownership
+    // 2k added to the token that owns the liked caw
+
+    // balance(1) => 32704.3552 - 4000
+    // balance(2) => 10942.3868 + 2000*10942.3868/(16353.2579 + 10942.3868) + 2000
+    // balance(3) => 16353.2579 + 2000*16353.2579/(16353.2579 + 10942.3868)
+
+    await expectBalanceOf(1, {toEqual: 28704.3552});
+    await expectBalanceOf(2, {toEqual: 13744.1548});
+    await expectBalanceOf(3, {toEqual: 17551.4900});
+
+    try {
+      // It will fail if you try to replay the same call
+      await reCaw({
+        cawSig: secondCawSig,
+        sender: accounts[2],
+        ownerTokenId: 2,
+        senderTokenId: 1,
+        action: 1
+      });
+    } catch(err) { error = err.message; }
+    expect(error).to.include('invalid action number');
+    error = null;
 
 
 

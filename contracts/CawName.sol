@@ -57,7 +57,7 @@ contract CawName is
   // 4,294,967,296 should be enough actions for each user
   mapping(uint64 => uint32) public takenActionCount;
 
-  mapping(uint64 => uint64) public followerCounts;
+  mapping(uint64 => uint64) public followerCount;
 
   // mapping(uint256 => uint256) public previousOwners;
   mapping(uint64 => uint256) public cawOwnership;
@@ -256,7 +256,7 @@ contract CawName is
     spendAndDistribute(followData.senderTokenId, 30000, 6000);
     addToBalance(followData.followeeTokenId, 24000);
 
-    followerCounts[followData.followeeTokenId] += 1;
+    followerCount[followData.followeeTokenId] += 1;
     takenActionCount[followData.senderTokenId] += 1;
     isVerified[followData.senderTokenId][bytes8(r)] = true;
   }
