@@ -65,19 +65,21 @@ Each of these requirements have been accounted for in the `verifySignature` meth
 
 The proposed solution to these requirements is to use Orbit DB with the following decentralized databases:
 
+```
   i)   A single global action-feed for 'pending actions'
   ii)  A single global caw-feed for all newly verified caws and re-caws
   iii) A CawName specific caw-feed containing caws posted by that CawName
   iv)  A hashtag specific caw-feed for each and every hashtag used
   v)   A CawName specific caw-feed containing the caws posted from the followers of the specified CawName
   vi)  A CawName specific non-caw-feed containing all actions posted from a CawName
+```
 
 
 When a user takes any action (cawing -posting a caw-, liking a caw, following a user, recawing a caw, tipping a user),
 the front-end client will assemble the necessary data in the format of the struct ActionData found in the
 CawName contract, as follows:
 
-<code>
+```
   struct ActionData {
     ActionType actionType;
     uint64 senderTokenId;
@@ -88,7 +90,7 @@ CawName contract, as follows:
     bytes32 cawId;
     string text;
   }
-</code>
+```
 
 The user will sign this ActionData, and the front-end client will submit both the ActionData and the signature to the
 global 'pending actions' database (i). If the action is a caw, it will submit it to the caw-feed for that cawName (iii).
@@ -96,7 +98,12 @@ global 'pending actions' database (i). If the action is a caw, it will submit it
 In the case of a Caw, the `cawId` and `receiverTokenId` fields should be left empty (0x000...00, and 0 respectively),
 and in the case of all other actions, the `text` field should be left empty (""). 
 
-The actionType should be a uint8 which corresponds to the intended index of the following enum: `{ CAW, LIKE, RECAW, FOLLOW }`
+The actionType should be a uint8 which corresponds to the intended index of the following enum:
+
+```
+{ CAW, LIKE, RECAW, FOLLOW }
+```
+
 (e.g. 0 for CAW; 1 for LIKE; etc..)
 
 
