@@ -47,23 +47,24 @@ A decentralized social network comes with a number of difficult problems, especi
 primary source of truth (the etherum blockchain) requires significant fees to store data.
 
 The proposed approach (as implied by <a href='https://caw.is'>CAW manifesto</a>)
-is to have a second source of truth, a decentralized database (possibly ARWeave),
+is to have a second source of truth, a decentralized database (possibly ARWeave or OrbitDB),
 along side the ethereum blockchain.
 
 Due to the open nature of a decentralized database, anyone will be able to post anything to
 this database at any time, which allows for many avenues of data injection attacks.
 The following is a list of security requirements:
 
+```
   a) Only the owner of a CawName can make a post with that CawName
   b) A CawName must spend CAW (as specified by the manifesto) for each action to be valid 
   c) Actions sent from a CawName under a previous owner should still be valid
   d) A single action must only be processed on the blockchain once
-
+```
 
 Each of these requirements have been accounted for in the `verifySignature` method in the contract.
 
 
-The proposed solution to these requirements is to use Orbit DB with the following decentralized databases:
+The proposed solution to these requirements is to use OrbitDB with the following decentralized databases:
 
 ```
   i)   A single global action-feed for 'pending actions'
