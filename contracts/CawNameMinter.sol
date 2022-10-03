@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-import "../node_modules/@openzeppelin/contracts/access/Ownable.sol";
 import "../node_modules/@openzeppelin/contracts/utils/Context.sol";
 import "../node_modules/@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "./interfaces/IMint.sol";
@@ -33,6 +32,7 @@ contract CawNameMinter is Context {
 
     CawName.mint(msg.sender, username, newId); 
   }
+
   function isValidUsername(string memory _input) public pure returns (bool) {
     bytes memory input = bytes(_input);
     if (input.length == 0 || input.length > 255) return false;

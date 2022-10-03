@@ -2,8 +2,11 @@ const IERC20 = artifacts.require("IERC20");
 const CawNameURI = artifacts.require("CawNameURI");
 const Usernames = artifacts.require("CawName");
 const CawNameMinter = artifacts.require("CawNameMinter");
+const CawActions = artifacts.require("CawActions");
 const ISwapper = artifacts.require("ISwapRouter");
 // const ethereumjs = require("ethereumjs-util");
+
+const truffleAssert = require('truffle-assertions');
 
 
 const {signTypedMessage} = require('@truffle/hdwallet-provider');
@@ -26,8 +29,8 @@ const usdcAddress = '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48'; // USDC
 var minter;
 var swapper;
 var usernames;
+var cawActions;
 var uriGenerator;
-var domain;
 var token;
 
 const dataTypes = {
@@ -37,32 +40,16 @@ const dataTypes = {
     { name: 'chainId', type: 'uint256' },
     { name: 'verifyingContract', type: 'address' },
   ],
-  CawData: [
+  ActionData: [
+    { name: 'actionType', type: 'uint8' },
+    { name: 'senderTokenId', type: 'uint64' },
+    { name: 'receiverTokenId', type: 'uint64' },
+    { name: 'tipAmount', type: 'uint256' },
+    { name: 'timestamp', type: 'uint64' },
+    { name: 'sender', type: 'address' },
+    { name: 'cawId', type: 'bytes32' },
     { name: 'text', type: 'string' },
-    { name: 'sender', type: 'address' },
-    { name: 'tokenId', type: 'uint64' },
-    { name: 'action', type: 'uint32' },
   ],
-  CawLike: [
-    { name: 'senderTokenId', type: 'uint64' },
-    { name: 'sender', type: 'address' },
-    { name: 'ownerTokenId', type: 'uint64' },
-    { name: 'cawId', type: 'bytes8' },
-    { name: 'action', type: 'uint32' },
-  ],
-  ReCawData: [
-    { name: 'senderTokenId', type: 'uint64' },
-    { name: 'ownerTokenId', type: 'uint64' },
-    { name: 'sender', type: 'address' },
-    { name: 'action', type: 'uint32' },
-    { name: 'cawId', type: 'bytes8' },
-  ],
-  FollowData: [
-    { name: 'sender', type: 'address' },
-    { name: 'senderTokenId', type: 'uint64' },
-    { name: 'followeeTokenId', type: 'uint64' },
-    { name: 'action', type: 'uint32' },
-  ]
 };
 
 const gasUsed = async function(transaction) {
@@ -83,8 +70,8 @@ async function signData(user, data) {
   });
 }
 
-async function sendCaw(user, tokenId, message, params = {}) {
 
+// OLD SIGNING METHOD:
   // console.log("will sha 3", domain);
   // const timestamp = Math.floor(new Date().getTime() / 1000)
   // var params = [1, tokenId, timestamp, message];
@@ -98,188 +85,80 @@ async function sendCaw(user, tokenId, message, params = {}) {
   // var sig = await web3.eth.personal.sign(hash, user);
   // console.log("ABOUT TO SIGN sig", sig);
 
-  action = params.action;
-  if (action == null) action = Number(await usernames.takenActionCount(tokenId));
-
+async function processActions(actions, params) {
   console.log("---");
-  console.log("SEND CAW with action ",action);
+  console.log("PROCESS ACTIONS");
+  var signedActions = await Promise.all(actions.map(async function(params) {
+    var data = await generateData(params.actionType, params);
+    // console.log("Signing with data:", data);
+    var sig = await signData(params.sender, data);
+    var sigData = await verifyAndSplitSig(sig, params.sender, data);
 
-  const cawData = {
-    action: action + 1,
-    sender: user,
-    tokenId: tokenId,
-    text: message,
-  };
+    return {
+      data: data,
+      sigData: sigData,
+    };
+  }));
 
+    console.log("Data", signedActions.map(function(action) {return action.data.message}))
 
-  var data = {
-    primaryType: 'CawData',
-    message: cawData,
-    domain, 
-    types: {
-      EIP712Domain: dataTypes.EIP712Domain,
-      CawData: dataTypes.CawData,
-    },
-  };
-  // console.log('DATA', data)
-  var sig = await signData(user, data);
-  var sigData = verifyAndSplitSig(sig, user, data);
-
-  t = await usernames.caw(sigData.v, sigData.r, sigData.s, cawData, {
-    nonce: await web3.eth.getTransactionCount(user),
-    from: user,
-  });
-
-  var fullTx = await web3.eth.getTransaction(t.tx);
-  console.log("send caw GAS", BigInt(t.receipt.gasUsed));
-
-  return {
-    tx: t,
-    sig: sig
-  };
-}
-
-/*
-  {
-      cawSig: secondCawSig,
-      sender: accounts[2],
-      senderTokenId: 3,
-      ownerTokenId: 2,
-  };
-
-*/
-async function likeCaw(params) {
-
-  action = params.action;
-  if (action == null) action = Number(await usernames.takenActionCount(params.senderTokenId));
-
-  console.log("---");
-  console.log("Like CAW with action ", action);
-
-  const likeData = {
-    action: action + 1,
-    senderTokenId: params.senderTokenId,
-    sender: params.sender,
-    ownerTokenId: params.ownerTokenId,
-    cawId: params.cawSig.substring(0,18),
-  };
-
-
-  var data = {
-    primaryType: 'CawLike',
-    message: likeData,
-    domain, 
-    types: {
-      EIP712Domain: dataTypes.EIP712Domain,
-      CawLike: dataTypes.CawLike,
-    },
-  };
-  // console.log('DATA', data)
-  var sig = await signData(params.sender, data);
-  var sigData = verifyAndSplitSig(sig, params.sender, data);
-
-  t = await usernames.likeCaw(sigData.v, sigData.r, sigData.s, likeData, {
+  t = await cawActions.processActions({
+    v: signedActions.map(function(action) {return action.sigData.v}),
+    r: signedActions.map(function(action) {return action.sigData.r}),
+    s: signedActions.map(function(action) {return action.sigData.s}),
+    actions: signedActions.map(function(action) {return action.data.message}),
+  }, {
     nonce: await web3.eth.getTransactionCount(params.sender),
     from: params.sender,
   });
 
   var fullTx = await web3.eth.getTransaction(t.tx);
-  console.log("like caw GAS", BigInt(t.receipt.gasUsed));
+  console.log("processed", signedActions.length, "actions. GAS units:", BigInt(t.receipt.gasUsed));
 
   return {
     tx: t,
-    sig: sig
+    signedActions: signedActions
   };
 }
 
-async function followUser(params) {
-  action = params.action;
-  if (action == null) action = Number(await usernames.takenActionCount(params.senderTokenId));
+async function generateData(type, params = {}) {
+  var actionType = {
+    caw: 0,
+    like: 1,
+    recaw: 2,
+    follow: 3,
+  }[type];
 
-  console.log("---");
-  console.log("Like CAW with action ", action);
-
-  const followData = {
-    action: action + 1,
-    senderTokenId: params.senderTokenId,
-    sender: params.sender,
-    followeeTokenId: params.followeeTokenId,
+  var domain = {
+    chainId: 31337,
+    name: 'CawNet',
+    verifyingContract: cawActions.address,
+    version: '1'
   };
 
-
-  var data = {
-    primaryType: 'FollowData',
-    message: followData,
-    domain, 
+  return {
+    primaryType: 'ActionData',
+    message: {
+      actionType: actionType,
+      sender: params.sender,
+      senderTokenId: params.senderTokenId,
+      receiverTokenId: params.receiverTokenId || 0,
+      tipAmount: params.tipAmount || 0,
+      timestamp: params.timestamp || (Math.floor(new Date().getTime() / 1000)),
+      cawId: params.cawId || "0x0000000000000000000000000000000000000000000000000000000000000000",
+      text: params.text || "",
+    },
+    domain: domain,
     types: {
       EIP712Domain: dataTypes.EIP712Domain,
-      FollowData: dataTypes.FollowData,
+      ActionData: dataTypes.ActionData,
     },
-  };
-  // console.log('DATA', data)
-  var sig = await signData(params.sender, data);
-  var sigData = verifyAndSplitSig(sig, params.sender, data);
-
-  t = await usernames.followUser(sigData.v, sigData.r, sigData.s, followData, {
-    nonce: await web3.eth.getTransactionCount(params.sender),
-    from: params.sender,
-  });
-
-  var fullTx = await web3.eth.getTransaction(t.tx);
-  console.log("follow GAS", BigInt(t.receipt.gasUsed));
-
-  return {
-    tx: t,
-    sig: sig
   };
 }
 
-async function reCaw(params) {
-  action = params.action;
-  if (action == null) action = Number(await usernames.takenActionCount(params.senderTokenId));
-
-  console.log("---");
-  console.log("RECAW with action ", action);
-
-  const reCawData = {
-    action: action + 1,
-    senderTokenId: params.senderTokenId,
-    sender: params.sender,
-    ownerTokenId: params.ownerTokenId,
-    cawId: params.cawSig.substring(0,18),
-  };
-
-
-  var data = {
-    primaryType: 'ReCawData',
-    message: reCawData,
-    domain, 
-    types: {
-      EIP712Domain: dataTypes.EIP712Domain,
-      ReCawData: dataTypes.ReCawData,
-    },
-  };
-  // console.log('DATA', data)
-  var sig = await signData(params.sender, data);
-  var sigData = verifyAndSplitSig(sig, params.sender, data);
-
-  t = await usernames.reCaw(sigData.v, sigData.r, sigData.s, reCawData, {
-    nonce: await web3.eth.getTransactionCount(params.sender),
-    from: params.sender,
-  });
-
-  var fullTx = await web3.eth.getTransaction(t.tx);
-  console.log("ReCaw caw GAS", BigInt(t.receipt.gasUsed));
-
-  return {
-    tx: t,
-    sig: sig
-  };
-}
-
-function verifyAndSplitSig(sig, user, data) {
+async function verifyAndSplitSig(sig, user, data) {
   console.log('SIG', sig)
-  console.log('hashed SIG', web3.utils.soliditySha3(sig))
+  // console.log('hashed SIG', web3.utils.soliditySha3(sig))
   
   const signatureSans0x = sig.substring(2)
   const r = '0x' + signatureSans0x.substring(0,64);
@@ -393,15 +272,9 @@ contract('CawNames', function(accounts, x) {
     console.log("URI Generator addr", uriGenerator.address);
     minter = minter || await CawNameMinter.deployed();
     usernames = usernames || await Usernames.deployed();
+    cawActions = cawActions || await CawActions.deployed();
     token = token || await IERC20.at(cawAddress);
     swapper = await ISwapper.at('0x7a250d5630b4cf539739df2c5dacb4c659f2488d'); // uniswap
-
-    domain = {
-      chainId: 31337,
-      name: 'CawNet',
-      verifyingContract: usernames.address,
-      version: '1'
-    };
   });
 
   it("", async function() {
@@ -479,11 +352,25 @@ contract('CawNames', function(accounts, x) {
     await expectBalanceOf(2, {toEqual: 40000});
     await expectBalanceOf(3, {toEqual: 10000});
 
-    var response = await sendCaw(accounts[2], 1, "the first caw message ever sent");
-    console.log("FISRT CAW SENT!")
+    var timestamp = (Math.floor(new Date().getTime() / 1000));
+    var result = await processActions([{
+      actionType: 'caw',
+      message: "the first caw message ever sent",
+      sender: accounts[2],
+      senderTokenId: 1,
+      timestamp: timestamp,
+    }], {
+      sender: accounts[2]
+    });
+    var cawId = result.signedActions[0].sigData.r;
+    console.log("FISRT CAW SENT!", cawId);
 
+    truffleAssert.eventEmitted(result.tx, 'ActionProcessed', (args) => {
+      return args.senderId == 1n &&
+        args.actionId == result.signedActions[0].sigData.r;
+    });
 
-    var isVerfied = await usernames.isVerified(1, response.sig.substring(0,18));
+    var isVerfied = await cawActions.isVerified(1, cawId);
     expect(isVerfied.toString()).to.equal('true');
 
 
@@ -501,15 +388,39 @@ contract('CawNames', function(accounts, x) {
     await expectBalanceOf(3, {toEqual: 11000});
 
 
-    try {
-      // It will fail if you try to replay the same call
-      response = await sendCaw(accounts[2], 1, "the first caw message ever sent", {action: 0});
-    } catch(err) { error = err.message; }
-    expect(error).to.include('invalid action number');
-    error = null;
+    var result = await processActions([{
+      actionType: 'caw',
+      message: "the first caw message ever sent",
+      timestamp: timestamp,
+      sender: accounts[2],
+      senderTokenId: 1,
+    }], {
+      sender: accounts[2]
+    });
 
-    response = await sendCaw(accounts[2], 2, "the second caw message ever sent");
-    var secondCawSig = response.sig;
+    console.log("Expect fail:")
+    truffleAssert.eventEmitted(result.tx, 'ActionRejected', (args) => {
+      return args.senderId == 1n &&
+        args.actionId == result.signedActions[0].sigData.r &&
+        args.reason == 'this action has already been processed';
+    });
+
+
+    result = await processActions([{
+      actionType: 'caw',
+      message: "the second caw message ever sent",
+      sender: accounts[2],
+      senderTokenId: 2,
+    }], {
+      sender: accounts[2]
+    });
+
+    truffleAssert.eventEmitted(result.tx, 'ActionProcessed', (args) => {
+      return args.senderId == 2n &&
+        args.actionId == result.signedActions[0].sigData.r;
+    });
+
+    var secondCawId = result.signedActions[0].sigData.r;
 
     rewardMultiplier = await usernames.rewardMultiplier();
     console.log("REWARD MUL", BigInt(rewardMultiplier).toString())
@@ -524,15 +435,19 @@ contract('CawNames', function(accounts, x) {
     await expectBalanceOf(2, {toEqual: 39000});
     await expectBalanceOf(3, {toEqual: 14437.5});
 
-
-    await likeCaw({
-      cawSig: secondCawSig,
+    timestamp = Math.floor(new Date().getTime() / 1000);
+    await processActions([{
+      timestamp: timestamp,
+      actionType: 'like',
+      cawId: secondCawId,
       sender: accounts[2],
+      receiverTokenId: 2,
       senderTokenId: 3,
-      ownerTokenId: 2,
+    }], {
+      sender: accounts[2]
     });
 
-    var likes = await usernames.likes(2, secondCawSig.substring(0,18));
+    var likes = await cawActions.likes(2, secondCawId);
     await expect(likes.toString()).to.equal('1');
 
     // 2k caw gets spent from the sender, 400 distributed
@@ -547,27 +462,37 @@ contract('CawNames', function(accounts, x) {
     await expectBalanceOf(2, {toEqual: 40942.3868});
     await expectBalanceOf(3, {toEqual: 12437.5});
 
-    try {
-      // It will fail if you try to replay the same call
-      await likeCaw({
-        cawSig: secondCawSig,
-        sender: accounts[2],
-        senderTokenId: 3,
-        ownerTokenId: 2,
-        action: 0
-      });
-    } catch(err) { error = err.message; }
-    expect(error).to.include('invalid action number');
-    error = null;
-
-
-    await followUser({
+    result = await processActions([{
+      timestamp: timestamp,
+      actionType: 'like',
+      cawId: secondCawId,
       sender: accounts[2],
-      followeeTokenId: 1,
-      senderTokenId: 2,
+      receiverTokenId: 2,
+      senderTokenId: 3,
+    }], {
+      sender: accounts[2]
     });
 
-    var followCount = await usernames.followerCount(1);
+    console.log("Expect fail:")
+    truffleAssert.eventEmitted(result.tx, 'ActionRejected', (args) => {
+      return args.senderId == 3n &&
+        args.actionId == result.signedActions[0].sigData.r &&
+        args.reason == 'this action has already been processed';
+    });
+
+
+    timestamp = Math.floor(new Date().getTime() / 1000);
+    await processActions([{
+      timestamp: timestamp,
+      actionType: 'follow',
+      sender: accounts[2],
+      receiverTokenId: 1,
+      senderTokenId: 2,
+    }], {
+      sender: accounts[2]
+    });
+
+    var followCount = await cawActions.followerCount(1);
     await expect(followCount.toString()).to.equal('1');
 
     // 30k caw gets spent from the sender, 6000 distributed
@@ -582,29 +507,40 @@ contract('CawNames', function(accounts, x) {
     await expectBalanceOf(2, {toEqual: 10942.3868});
     await expectBalanceOf(3, {toEqual: 16353.2579});
 
-    try {
-      // It will fail if you try to replay the same call
-      await followUser({
-        sender: accounts[2],
-        followeeTokenId: 1,
-        senderTokenId: 2,
-        action: 1
-      });
-    } catch(err) { error = err.message; }
-    expect(error).to.include('invalid action number');
-    error = null;
-
-
-
-    await reCaw({
-      cawSig: secondCawSig,
+    // It will fail if you try to replay the same call
+    result = await processActions([{
+      timestamp: timestamp,
+      actionType: 'follow',
       sender: accounts[2],
-      ownerTokenId: 2,
-      senderTokenId: 1,
+      receiverTokenId: 1,
+      senderTokenId: 2,
+    }], {
+      sender: accounts[2]
     });
 
-    // var reCawCount = await usernames.reCawCount(1);
-    // await expect(reCawCount.toString()).to.equal('1');
+    console.log("Expect fail:")
+    truffleAssert.eventEmitted(result.tx, 'ActionRejected', (args) => {
+      return args.senderId == 2n &&
+        args.actionId == result.signedActions[0].sigData.r &&
+        args.reason == 'this action has already been processed';
+    });
+
+
+
+    timestamp = Math.floor(new Date().getTime() / 1000);
+    await processActions([{
+      timestamp: timestamp,
+      actionType: 'recaw',
+      cawId: secondCawId,
+      sender: accounts[2],
+      receiverTokenId: 2,
+      senderTokenId: 1,
+    }], {
+      sender: accounts[2]
+    });
+
+    // var recawCount = await usernames.recawCount(1);
+    // await expect(recawCount.toString()).to.equal('1');
 
     // 4k caw gets spent from the sender, 2k distributed
     // among other caw stakers proportional to their ownership
@@ -618,19 +554,49 @@ contract('CawNames', function(accounts, x) {
     await expectBalanceOf(2, {toEqual: 13744.1548});
     await expectBalanceOf(3, {toEqual: 17551.4900});
 
-    try {
-      // It will fail if you try to replay the same call
-      await reCaw({
-        cawSig: secondCawSig,
-        sender: accounts[2],
-        ownerTokenId: 2,
-        senderTokenId: 1,
-        action: 1
-      });
-    } catch(err) { error = err.message; }
-    expect(error).to.include('invalid action number');
-    error = null;
+    result = await processActions([{
+      timestamp: timestamp,
+      actionType: 'recaw',
+      cawId: secondCawId,
+      sender: accounts[2],
+      receiverTokenId: 2,
+      senderTokenId: 1,
+    }], {
+      sender: accounts[2]
+    });
 
+    console.log("Expect fail:")
+    truffleAssert.eventEmitted(result.tx, 'ActionRejected', (args) => {
+      return args.senderId == 1n &&
+        args.actionId == result.signedActions[0].sigData.r &&
+        args.reason == 'this action has already been processed';
+    });
+
+
+    tx = await deposit(accounts[2], 2, 2000000);
+
+    var actionsToProcess = [{
+      actionType: 'recaw',
+      cawId: secondCawId,
+      sender: accounts[2],
+      receiverTokenId: 2,
+      senderTokenId: 3,
+    }, {
+      actionType: 'like',
+      sender: accounts[2],
+      senderTokenId: 1,
+      cawId: secondCawId,
+    }]
+
+    for(var i = 0; i < 32; i++)
+      actionsToProcess.push({
+        actionType: 'caw',
+        sender: accounts[2],
+        senderTokenId: 2,
+        text: "This is a caw processed in a list of processed actions. " + i,
+      });
+
+    await processActions(actionsToProcess, { sender: accounts[1] });
 
 
   });

@@ -1,5 +1,6 @@
 const CawName = artifacts.require("CawName");
 const CawNameURI = artifacts.require("CawNameURI");
+const CawActions = artifacts.require("CawActions");
 const CawNameMinter = artifacts.require("CawNameMinter");
 const CAW = artifacts.require("MintableCAW");
 
@@ -11,10 +12,16 @@ module.exports = async function (deployer) {
   console.log("URI generator", uriGenerator.address);
   await deployer.deploy(CawName, caw, uriGenerator.address);
   var cawNames = await CawName.deployed();
+  console.log("DEPLOYED Caw Names: ", cawNames.address)
 
-  console.log("DEPLOY: ", caw, cawNames.address)
   await deployer.deploy(CawNameMinter, caw, cawNames.address);
   var minter = await CawNameMinter.deployed();
+  console.log("DEPLOYED Minter: ", minter.address)
+
+  await deployer.deploy(CawActions, cawNames.address);
+  var cawActions = await CawActions.deployed();
+  console.log("DEPLOYed action taker: ", cawActions.address)
 
   cawNames.setMinter(minter.address);
+  cawNames.setCawActions(cawActions.address);
 };

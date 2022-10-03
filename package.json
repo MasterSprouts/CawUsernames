@@ -4,6 +4,7 @@
     "@openzeppelin/test-helpers": "^0.5.15",
     "@truffle/hdwallet-provider": "^2.0.14",
     "solregex": "^0.3.1",
+    "truffle-assertions": "^0.9.2",
     "truffle-plugin-verify": "^0.5.26"
   }
 }
