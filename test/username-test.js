@@ -102,7 +102,7 @@ async function processActions(actions, params) {
 
     console.log("Data", signedActions.map(function(action) {return action.data.message}))
 
-  t = await cawActions.processActions({
+  t = await cawActions.processActions(params.senderTokenId || 1, {
     v: signedActions.map(function(action) {return action.sigData.v}),
     r: signedActions.map(function(action) {return action.sigData.r}),
     s: signedActions.map(function(action) {return action.sigData.s}),

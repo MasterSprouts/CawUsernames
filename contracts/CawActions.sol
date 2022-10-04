@@ -30,6 +30,8 @@ contract CawActions is Context {
 
   bytes32 public eip712DomainHash;
 
+  mapping(uint64 => uint64) public processedActions;
+
   // tokenID => reducedSig => action
   mapping(uint64 => mapping(bytes32 => uint32)) public likes;
 
@@ -159,17 +161,20 @@ contract CawActions is Context {
     );
   }
 
-  function processActions(MultiActionData calldata data) external {
+  function processActions(uint64 senderTokenId, MultiActionData calldata data) external {
     uint8[] calldata v = data.v;
     bytes32[] calldata r = data.r;
     bytes32[] calldata s = data.s;
+    uint16 processed;
     for (uint16 i=0; i < data.actions.length; i++) {
       try CawActions(this).processAction(data.actions[i], v[i], r[i], s[i]) {
         emit ActionProcessed(data.actions[i].senderTokenId, r[i]);
+        processed += 1;
       } catch Error(string memory _err) {
         emit ActionRejected(data.actions[i].senderTokenId, r[i], _err);
       }
     }
+    processedActions[senderTokenId] += processed;
   }
 
 }
