@@ -31,6 +31,12 @@ contract CawName is
   uint256 public rewardMultiplier = 10**18;
   uint256 public precision = 30425026352721 ** 2;// ** 3;
 
+  struct Token {
+    uint256 tokenId;
+    uint256 balance;
+    string username;
+  }
+
   constructor(address _caw, address _gui) ERC721("CAW NAME", "cawNAME") {
     uriGenerator = CawNameURI(_gui);
     CAW = IERC20(_caw);
@@ -62,6 +68,20 @@ contract CawName is
 
   function nextId() public view returns (uint64) {
     return uint64(usernames.length) + 1;
+  }
+
+  function tokens(address user) external view returns (Token[] memory) {
+    uint256 tokenId;
+    uint256 balance = balanceOf(user);
+    Token[] memory userTokens = new Token[](balance);
+    for (uint64 i = 0; i < balance; i++) {
+      tokenId = tokenOfOwnerByIndex(user, i);
+
+      userTokens[i].balance = cawBalanceOf(uint64(tokenId));
+      userTokens[i].username = usernames[tokenId - 1];
+      userTokens[i].tokenId = tokenId;
+    }
+    return userTokens;
   }
 
   /**

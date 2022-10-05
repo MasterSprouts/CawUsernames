@@ -598,6 +598,10 @@ contract('CawNames', function(accounts, x) {
 
     await processActions(actionsToProcess, { sender: accounts[1] });
 
+    console.log("checking tokens");
+    var tokens = await usernames.tokens(accounts[2]);
+    console.log("TOKENS:", tokens);
+
 
   });
 
