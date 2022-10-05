@@ -80,6 +80,7 @@ contract CawActions is Context {
   function caw(
     ActionData calldata data
   ) internal {
+    require(bytes(data.text).length <= 420, 'text must be less than 420 characters');
     CawName.spendAndDistribute(data.senderTokenId, 5000, 5000);
   }
 
