@@ -9,7 +9,7 @@ import "../node_modules/@openzeppelin/contracts/access/Ownable.sol";
 import "./CawNameURI.sol";
 
 // AccessControlEnumerable,
-contract CawName is 
+contract CawBalance is 
   Context,
   ERC721Enumerable,
   Ownable
@@ -25,8 +25,10 @@ contract CawName is
 
   string[] public usernames;
 
-  // mapping(uint256 => uint256) public previousOwners;
   mapping(uint64 => uint256) public cawOwnership;
+
+  uint256 public rewardMultiplier = 10**18;
+  uint256 public precision = 30425026352721 ** 2;// ** 3;
 
   struct Token {
     uint256 tokenId;
@@ -40,31 +42,17 @@ contract CawName is
     // CAW = IERC20(0xf3b9569F82B18aEf890De263B84189bd33EBe452);
   }
 
-  function setMinter(address _minter) public onlyOwner {
-    minter = _minter;
-  }
-
   function setCawActions(address _cawActions) public onlyOwner {
     cawActions = _cawActions;
   }
 
-  // create an ARTIST_ROLE
+  // create an ARTIST_ROLE ??
   function setUriGenerator(address _gui) public onlyOwner {
     uriGenerator = CawNameURI(_gui);
   }
 
   function tokenURI(uint256 tokenId) override public view returns (string memory) {
     return uriGenerator.generate(usernames[uint64(tokenId) - 1]);
-  }
-
-  function mint(address sender, string memory username, uint64 newId) public {
-    require(minter == _msgSender(), "caller is not the minter");
-    usernames.push(username);
-    _safeMint(sender, newId);
-  }
-
-  function nextId() public view returns (uint64) {
-    return uint64(usernames.length) + 1;
   }
 
   function tokens(address user) external view returns (Token[] memory) {
@@ -111,17 +99,42 @@ contract CawName is
     totalCaw -= amount;
   }
 
-  function _afterTokenTransfer(
-    address from,
-    address to,
-    uint256 tokenId
-  ) internal virtual override {
-    // tell other chain about transfer?
+  function cawBalanceOf(uint64 tokenId) public view returns (uint256){
+    return cawOwnership[tokenId] * rewardMultiplier / (precision);
   }
 
-  function unlock(uint256 amount) {
+  function spendAndDistribute(uint64 tokenId, uint256 amountToSpend, uint256 amountToDistribute) external {
+    require(cawActions == _msgSender(), "caller is not the cawActions contract");
 
+    uint256 balance = cawBalanceOf(tokenId);
+    amountToDistribute *= 10**18;
+    amountToSpend *= 10**18;
+
+    require(balance >= amountToSpend, 'insufficent CAW balance');
+    uint256 newCawBalance = balance - amountToSpend;
+
+    rewardMultiplier += rewardMultiplier * amountToDistribute / (totalCaw - balance);
+    setCawBalance(tokenId, newCawBalance);
   }
+
+  function addToBalance(uint64 tokenId, uint256 amount) external {
+    require(cawActions == _msgSender(), "caller is not the cawActions contract");
+
+    setCawBalance(tokenId, cawBalanceOf(tokenId) + (amount * 10**18));
+  }
+
+  function setCawBalance(uint64 tokenId, uint256 newCawBalance) internal {
+    cawOwnership[tokenId] = precision * newCawBalance / rewardMultiplier;
+  }
+
+    function transferFrom(
+        address from, address to, uint256 tokenId
+    ) public virtual override {
+      require(cawActions == _msgSender(), "caller is not the cawActions contract");
+
+      _transfer(from, to, tokenId);
+    }
 
 }
+
 
