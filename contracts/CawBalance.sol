@@ -2,16 +2,18 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-import "../node_modules/@openzeppelin/contracts/token/ERC721/extensions/ERC721Enumerable.sol";
 import "../node_modules/@openzeppelin/contracts/utils/cryptography/draft-EIP712.sol";
 import "../node_modules/@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "../node_modules/@openzeppelin/contracts/access/Ownable.sol";
 import "./CawNameURI.sol";
 
+import { AxelarExecutable } from '@axelar-network/axelar-gmp-sdk-solidity/contracts/executables/AxelarExecutable.sol';
+import { IAxelarGasService } from '@axelar-network/axelar-gmp-sdk-solidity/contracts/interfaces/IAxelarGasService.sol';
+
 // AccessControlEnumerable,
 contract CawBalance is 
+  AxelarExecutable,
   Context,
-  ERC721Enumerable,
   Ownable
 {
 
@@ -20,7 +22,6 @@ contract CawBalance is
 
   uint256 public totalCaw;
 
-  address public minter;
   address public cawActions;
 
   string[] public usernames;
@@ -36,7 +37,7 @@ contract CawBalance is
     string username;
   }
 
-  constructor(address _caw, address _gui) ERC721("CAW NAME", "cawNAME") {
+  constructor(address _caw, address _gui) {
     uriGenerator = CawNameURI(_gui);
     CAW = IERC20(_caw);
     // CAW = IERC20(0xf3b9569F82B18aEf890De263B84189bd33EBe452);
@@ -69,36 +70,6 @@ contract CawBalance is
     return userTokens;
   }
 
-  /**
-   * @dev See {IERC165-supportsInterface}.
-   */
-  function supportsInterface(bytes4 interfaceId)
-    public
-    view
-    virtual
-    override(ERC721Enumerable)
-    returns (bool)
-  {
-    return super.supportsInterface(interfaceId);
-  }
-
-  function deposit(uint64 tokenId, uint256 amount) public {
-    require(ownerOf(tokenId) == msg.sender, "can not deposit into a CawName that you do not own");
-
-    CAW.transferFrom(msg.sender, address(this), amount);
-    setCawBalance(tokenId, cawBalanceOf(tokenId) + amount);
-    totalCaw += amount;
-  }
-
-  function withdraw(uint64 tokenId, uint256 amount) public {
-    require(ownerOf(tokenId) == msg.sender, "can not withdraw from a CawName that you do not own");
-    require(cawBalanceOf(tokenId) >= amount, "insufficent CAW balance");
-
-    setCawBalance(tokenId, cawBalanceOf(tokenId) - amount);
-    CAW.transfer(msg.sender, amount);
-    totalCaw -= amount;
-  }
-
   function cawBalanceOf(uint64 tokenId) public view returns (uint256){
     return cawOwnership[tokenId] * rewardMultiplier / (precision);
   }
@@ -127,13 +98,35 @@ contract CawBalance is
     cawOwnership[tokenId] = precision * newCawBalance / rewardMultiplier;
   }
 
-    function transferFrom(
-        address from, address to, uint256 tokenId
-    ) public virtual override {
-      require(cawActions == _msgSender(), "caller is not the cawActions contract");
+  // This is the function that deposits caw into
+  // the user's username.
+  //
+  // it is called from "addToCawBalance", on
+  // the NFT contract on the Ethereum chian.
+  function _execute(
+    string calldata sourceChain_,
+    string calldata sourceAddress_,
+    bytes calldata payload_
+  ) internal override {
+    (uint64 tokenId, uint256 amount) = abi.decode(payload_, (uint256));
 
-      _transfer(from, to, tokenId);
-    }
+    deposit(tokenId, amount, sourceAddress_);
+  }
+
+  function transferOwnership(uint64 tokenId, address newAddress) {
+  }
+
+  function deposit(uint64 tokenId, uint256 amount, address owner) internal {
+    setCawBalance(tokenId, cawBalanceOf(tokenId) + amount);
+    totalCaw += amount;
+
+    // is the sourceAddress_ the original message sender????
+    // is the sourceAddress_ the original message sender????
+    // is the sourceAddress_ the original message sender????
+    // is the sourceAddress_ the original message sender????
+    ownerOf[tokenId] = owner;
+
+  }
 
 }
 

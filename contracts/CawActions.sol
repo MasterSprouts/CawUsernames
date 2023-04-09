@@ -7,7 +7,6 @@ import "../node_modules/@openzeppelin/contracts/utils/cryptography/draft-EIP712.
 import "./interfaces/ISpend.sol";
 
 import { AxelarExecutable } from '@axelar-network/axelar-gmp-sdk-solidity/contracts/executables/AxelarExecutable.sol';
-import { IAxelarGateway } from '@axelar-network/axelar-gmp-sdk-solidity/contracts/interfaces/IAxelarGateway.sol';
 import { IAxelarGasService } from '@axelar-network/axelar-gmp-sdk-solidity/contracts/interfaces/IAxelarGasService.sol';
 
 contract CawActions is Context, AxelarExecutable {
@@ -18,7 +17,8 @@ contract CawActions is Context, AxelarExecutable {
     ActionType actionType;
     uint64 senderTokenId;
     uint64 receiverTokenId;
-    uint256 tipAmount;
+    uint256 transactionFee;
+    uint256 cawAmount;
     uint64 timestamp;
     address sender;
     bytes32 cawId;
@@ -31,6 +31,8 @@ contract CawActions is Context, AxelarExecutable {
     bytes32[] r;
     bytes32[] s;
   }
+
+  uint256 gasCost;
 
   bytes32 public eip712DomainHash;
 
@@ -47,20 +49,20 @@ contract CawActions is Context, AxelarExecutable {
   event ActionProcessed(uint64 senderId, bytes32 actionId);
   event ActionRejected(uint64 senderId, bytes32 actionId, string reason);
 
-  ISpend CawName;
+  ISpend CawBalance;
 
 	string public sourceChain;
 	string public sourceAddress;
 	IAxelarGasService public immutable gasReceiver;
 
-  constructor(address _cawNames, address gateway_, address gasReceiver_) AxelarExecutable(gateway_) {
+  constructor(address _cawBalance, address gateway_, address gasReceiver_) AxelarExecutable(gateway_) {
 		gasReceiver = IAxelarGasService(gasReceiver_);
 
     eip712DomainHash = generateDomainHash();
-    CawName = ISpend(_cawNames);
+    cawBalance = ISpend(_cawBalance);
   }
 
-  function processAction(ActionData calldata action, uint8 v, bytes32 r, bytes32 s) external {
+  function processAction(uint64 validatorTokenId, ActionData calldata action, uint8 v, bytes32 r, bytes32 s) external {
     require(address(this) == _msgSender(), "caller is not the CawActions contract");
 
     verifySignature(v, r, s, action);
@@ -76,6 +78,8 @@ contract CawActions is Context, AxelarExecutable {
     else if (action.actionType == ActionType.WITHDRAW)
       withdraw(action);
 
+    cawBalance.spendAndDistribute(action.senderTokenId, action.transactionFee, 0);
+    cawBalance.addToBalance(validatorTokenId, action.transactionFee);
     isVerified[action.senderTokenId][r] = true;
   }
 
@@ -93,7 +97,7 @@ contract CawActions is Context, AxelarExecutable {
     ActionData calldata data
   ) internal {
     require(bytes(data.text).length <= 420, 'text must be less than 420 characters');
-    CawName.spendAndDistribute(data.senderTokenId, 5000, 5000);
+    cawBalance.spendAndDistribute(data.senderTokenId, 5000, 5000);
   }
 
 
@@ -106,8 +110,8 @@ contract CawActions is Context, AxelarExecutable {
     // Can a user like their own caw? 
     // if so, what happens with the funds?
 
-    CawName.spendAndDistribute(data.senderTokenId, 2000, 400);
-    CawName.addToBalance(data.receiverTokenId, 1600);
+    cawBalance.spendAndDistribute(data.senderTokenId, 2000, 400);
+    cawBalance.addToBalance(data.receiverTokenId, 1600);
 
     likes[data.receiverTokenId][data.cawId] += 1;
   }
@@ -115,15 +119,15 @@ contract CawActions is Context, AxelarExecutable {
   function reCaw(
     ActionData calldata data
   ) internal {
-    CawName.spendAndDistribute(data.senderTokenId, 4000, 2000);
-    CawName.addToBalance(data.receiverTokenId, 2000);
+    cawBalance.spendAndDistribute(data.senderTokenId, 4000, 2000);
+    cawBalance.addToBalance(data.receiverTokenId, 2000);
   }
 
   function followUser(
     ActionData calldata data
   ) internal {
-    CawName.spendAndDistribute(data.senderTokenId, 30000, 6000);
-    CawName.addToBalance(data.receiverTokenId, 24000);
+    cawBalance.spendAndDistribute(data.senderTokenId, 30000, 6000);
+    cawBalance.addToBalance(data.receiverTokenId, 24000);
 
     followerCount[data.receiverTokenId] += 1;
   }
@@ -131,16 +135,17 @@ contract CawActions is Context, AxelarExecutable {
   function withdraw(
     ActionData calldata data
   ) internal {
-    CawName.spendAndDistribute(data.senderTokenId, data.amounts[0], 0);
+    cawBalance.spendAndDistribute(data.senderTokenId, data.cawAmount, 0);
 
-
-    bytes memory payload = abi.encode('Ethereum', operator, data.senderTokenId, data.tipAmount);
+    bytes memory payload = abi.encode('Ethereum', operator, data.senderTokenId, data.cawAmount);
     string memory stringAddress = address(this).toString();
-    //Pay for gas. We could also send the contract call here but then the sourceAddress will be that of the gas receiver which is a problem later.
-    gasReceiver.payNativeGasForContractCall{ value: tipAmount }(address(this), mainChain, stringAddress, payload, msg.sender);
-    //Call remote contract.
-    gateway.callContract(mainChain, stringAddress, payload);
 
+    gasReceiver.payNativeGasForContractCall{
+      value: gasCost,
+    }(address(this), 'Ethereum', stringAddress, payload, msg.sender);
+
+    //Call remote contract.
+    gateway.callContract('Ethereum', stringAddress, payload);
   }
 
   function verifySignature(
@@ -149,13 +154,13 @@ contract CawActions is Context, AxelarExecutable {
   ) internal view {
     require(!isVerified[data.senderTokenId][r], 'this action has already been processed');
     bytes memory hash = abi.encode(
-      keccak256("ActionData(uint8 actionType,uint64 senderTokenId,uint64 receiverTokenId,uint256 tipAmount,uint64 timestamp,address sender,bytes32 cawId,string text)"),
-      data.actionType, data.senderTokenId, data.receiverTokenId, data.tipAmount,
+      keccak256("ActionData(uint8 actionType,uint64 senderTokenId,uint64 receiverTokenId,uint256 cawAmount,uint64 timestamp,address sender,bytes32 cawId,string text)"),
+      data.actionType, data.senderTokenId, data.receiverTokenId, data.cawAmount,
       data.timestamp, data.sender, data.cawId, keccak256(bytes(data.text))
     );
 
     address signer = getSigner(hash, v, r, s);
-    require(signer == CawName.ownerOf(data.senderTokenId), "signer is not owner of this CawName");
+    require(signer == cawBalance.ownerOf(data.senderTokenId), "signer is not owner of this CawName");
   }
 
   function getSigner(
@@ -189,51 +194,32 @@ contract CawActions is Context, AxelarExecutable {
     );
   }
 
-  function processActions(uint64 senderTokenId, MultiActionData calldata data) external {
+  function processActions(uint64 validatorTokenId, MultiActionData calldata data) external {
     uint8[] calldata v = data.v;
     bytes32[] calldata r = data.r;
     bytes32[] calldata s = data.s;
     uint16 processed;
     for (uint16 i=0; i < data.actions.length; i++) {
-      try CawActions(this).processAction(data.actions[i], v[i], r[i], s[i]) {
+      try CawActions(this).processAction(validatorTokenId, data.actions[i], v[i], r[i], s[i]) {
         emit ActionProcessed(data.actions[i].senderTokenId, r[i]);
         processed += 1;
       } catch Error(string memory _err) {
         emit ActionRejected(data.actions[i].senderTokenId, r[i], _err);
       }
     }
-    processedActions[senderTokenId] += processed;
+    processedActions[validatorTokenId] += processed;
   }
 
-	// Call this function to update the value of this contract along with all its siblings'.
-	function setRemoteValue(
-			string calldata destinationChain,
-			string calldata destinationAddress,
-			string calldata value_
-	) external payable {
-			bytes memory payload = abi.encode(value_);
-			if (msg.value > 0) {
-					gasReceiver.payNativeGasForContractCall{ value: msg.value }(
-							address(this),
-							destinationChain,
-							destinationAddress,
-							payload,
-							msg.sender
-					);
-			}
-			gateway.callContract(destinationChain, destinationAddress, payload);
-	}
-
-	// Handles calls created by setAndSend. Updates this contract's value
-	function _execute(
-			string calldata sourceChain_,
-			string calldata sourceAddress_,
-			bytes calldata payload_
-	) internal override {
-			(uint256 amount) = abi.decode(payload_, (uint256));
-			sourceChain = sourceChain_;
-			sourceAddress = sourceAddress_;
-			CawName.unlock(amount);
-	}
+  // Handles calls created by setAndSend. Updates this contract's value
+  // function _execute(
+  //   string calldata sourceChain_,
+  //   string calldata sourceAddress_,
+  //   bytes calldata payload_
+  // ) internal override {
+  //   (uint256 amount) = abi.decode(payload_, (uint256));
+  //   sourceChain = sourceChain_;
+  //   sourceAddress = sourceAddress_;
+  //   CawName.unlock(amount);
+  // }
 }
 

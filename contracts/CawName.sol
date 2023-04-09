@@ -8,25 +8,28 @@ import "../node_modules/@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "../node_modules/@openzeppelin/contracts/access/Ownable.sol";
 import "./CawNameURI.sol";
 
+import { AxelarExecutable } from '@axelar-network/axelar-gmp-sdk-solidity/contracts/executables/AxelarExecutable.sol';
+import { IAxelarGasService } from '@axelar-network/axelar-gmp-sdk-solidity/contracts/interfaces/IAxelarGasService.sol';
+
 // AccessControlEnumerable,
 contract CawName is 
-  Context,
   ERC721Enumerable,
-  Ownable
+  AxelarExecutable,
+  Ownable,
+  Context
 {
 
   IERC20 public immutable CAW;
   CawNameURI public uriGenerator;
 
-  uint256 public totalCaw;
+  // uint256 public totalCaw;
 
   address public minter;
   address public cawActions;
 
   string[] public usernames;
 
-  // mapping(uint256 => uint256) public previousOwners;
-  mapping(uint64 => uint256) public cawOwnership;
+  mapping(uint64 => uint256) public unlockedCaw;
 
   struct Token {
     uint256 tokenId;
@@ -74,7 +77,7 @@ contract CawName is
     for (uint64 i = 0; i < balance; i++) {
       tokenId = tokenOfOwnerByIndex(user, i);
 
-      userTokens[i].balance = cawBalanceOf(uint64(tokenId));
+      userTokens[i].balance = unlockedCaw[uint64(tokenId)];
       userTokens[i].username = usernames[tokenId - 1];
       userTokens[i].tokenId = tokenId;
     }
@@ -98,17 +101,29 @@ contract CawName is
     require(ownerOf(tokenId) == msg.sender, "can not deposit into a CawName that you do not own");
 
     CAW.transferFrom(msg.sender, address(this), amount);
-    setCawBalance(tokenId, cawBalanceOf(tokenId) + amount);
-    totalCaw += amount;
+    addToCawBalance(tokenId, amount, msg.sender);
+    // totalCaw += amount;
   }
 
   function withdraw(uint64 tokenId, uint256 amount) public {
     require(ownerOf(tokenId) == msg.sender, "can not withdraw from a CawName that you do not own");
-    require(cawBalanceOf(tokenId) >= amount, "insufficent CAW balance");
+    require(unlockedCaw[tokenId] >= amount, "insufficent CAW balance");
 
-    setCawBalance(tokenId, cawBalanceOf(tokenId) - amount);
+    unlockedCaw[tokenId] -= amount;
     CAW.transfer(msg.sender, amount);
-    totalCaw -= amount;
+    // totalCaw -= amount;
+  }
+
+  addToCawBalance(uint64 tokenId, uint256 value, address user) internal {
+    bytes memory payload = abi.encode('Fantom', operator, tokenId, value);
+    string memory stringAddress = address(this).toString();
+
+    gasReceiver.payNativeGasForContractCall{
+      value: msg.value,
+    }(address(this), 'Fantom', stringAddress, payload, user);
+
+    //Call remote contract.
+    gateway.callContract('Fantom', stringAddress, payload);
   }
 
   function _afterTokenTransfer(
@@ -117,10 +132,20 @@ contract CawName is
     uint256 tokenId
   ) internal virtual override {
     // tell other chain about transfer?
+    addToCawBalance(0, ownerOf(tokenId));
   }
 
-  function unlock(uint256 amount) {
+  function unlock(uint64 tokenId, uint256 amount) internal {
+    unlockedCaw[tokenId] += amount;
+  }
 
+  function _execute(
+    string calldata sourceChain_,
+    string calldata sourceAddress_,
+    bytes calldata payload_
+  ) internal override {
+    (uint64 tokenId, uint256 amount) = abi.decode(payload_, (uint256));
+    unlock(tokenId, amount);
   }
 
 }
